@@ -133,6 +133,8 @@ function! s:OpenBrowserOnHugo()
       execute '!start ' . url
     elseif executable('firefox')
       execute '!firefox ' . url
+    else
+      execute 'OpenBrowser ' . url
     endif
   endif
 endfunction
