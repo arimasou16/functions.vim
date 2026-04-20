@@ -56,6 +56,24 @@ function! s:GetTitleFromAmazon()
   execute '%s/^\s\+//ge'
 endfunction
 
+command! -nargs=0 ConvertAbcde call s:ConvertAbcde()
+function! s:ConvertAbcde()
+  execute '%!nkf -Z0'
+  execute '%s/〜/ \~ /ge'
+  execute '%s/！/! /ge'
+  execute '%s/＞/>/ge'
+  execute '%s/＜/</ge'
+  execute '%s/ \@<!(/ (/ge'
+  execute '%s/’/''/ge'
+  execute '%s/`/''/ge'
+  execute '%s/\~\s\+\(.\+\)\s\~/\~\1\~/ge'
+  execute '%s/^TTITLE\d\d\==Track \d\d\=\n//ge'
+  execute '%s/\(TTITLE\d\d\==\)T\=\d\{1,2\}\.*/\1/ge'
+  execute '%s/\s\s\+/ /ge'
+  execute '%s/\s\+$//ge'
+  execute '%s/　/ /ge'
+endfunction
+
 command! -nargs=0 GetTHMV call s:GetTitleFromHMV()
 function! s:GetTitleFromHMV()
   execute '%s/^\s\+//ge'
@@ -74,8 +92,9 @@ endfunction
 command! -nargs=0 ArrageKindle call s:ArragePurchaseHistoryOfKindle()
 function! s:ArragePurchaseHistoryOfKindle()
   execute '%s/^\(注文日\|合計\|受取人\|工藤秋生\|注文番号.*\|\s*注文の詳細.*\|Kindle 版\|販売:.*\|コンテンツと.*\|商品レビューを書く\|注文を非表示にする\)\n//ge'
+  execute '%s/^\s\+注文内容を表示 領収書等\s\+\n//ge'
   execute '%s/^\s*\n//ge'
-  execute '%s/\n^￥ /\t/ge'
+  execute '%s/\n^￥\s*/\t/ge'
   execute '%s/\(\d\{4\}年\)\@<=\(\d月\)/0\2/ge'
   execute '%s/\(\d\{4\}年\d\d月\)\@<=\(\d日\)/0\2/ge'
   execute '%s/^\(\d\{4\}年\d\d月\d\d日\t[0-9,]\+$\)\n/\1\t/ge'
