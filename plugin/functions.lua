@@ -98,3 +98,77 @@ vim.api.nvim_create_user_command('OpenHugo', function()
     end
   end
 end, {})
+
+-- ============================================================================
+-- GetLyrics
+-- ============================================================================
+vim.api.nvim_create_user_command('GetLyrics', function()
+  -- 1. コマンドラインで曲のID（*******の部分）を入力させる
+  local id = vim.fn.input("歌ネットの曲IDを入力してください (例: 12345): ")
+  
+  -- 空のままエンターを押した場合はキャンセル
+  if id == "" then
+    print("\nキャンセルしました。")
+    return
+  end
+  
+  -- 画面を更新して「取得中」メッセージを表示
+  print("\n取得中...")
+  vim.cmd('redraw')
+
+  -- 2. curlを使ってバックグラウンドでHTMLを直接取得
+  local url = "https://www.uta-net.com/song/" .. id .. "/"
+  local html = vim.fn.system({"curl", "-s", url})
+  
+  if vim.v.shell_error ~= 0 or html == "" then
+    print("取得に失敗しました。IDが間違っているか、ネットワークを確認してください。")
+    return
+  end
+
+  -- 3. Extract: HTMLから必要な部分だけをくり貫く
+  local title  = vim.fn.matchstr(html, [[<title>\zs\_.\{-}\ze</title>]])
+  local credit = vim.fn.matchstr(html, [[歌詞ページです。\zs\_.\{-}\ze(歌いだし)]])
+  local lyrics = vim.fn.matchstr(html, [[<div id="kashi_area" itemprop="text">\zs\_.\{-}\ze</div>]])
+  local artist = vim.fn.matchstr(html, [[<span itemprop="byArtist name">\zs\_.\{-}\ze</span>]])
+
+  local result_lines = {}
+  
+  if title ~= "" then table.insert(result_lines, title) end
+  if credit ~= "" then table.insert(result_lines, credit) end
+  if artist ~= "" then table.insert(result_lines, artist) end
+  if lyrics ~= "" then
+    for line in vim.gsplit(lyrics, "\n") do
+      table.insert(result_lines, line)
+    end
+  end
+
+  if #result_lines == 0 then
+    print("指定されたパターンが見つかりませんでした。")
+    return
+  end
+
+  -- 4. 現在のバッファを、くり貫いた結果で上書きする
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, result_lines)
+
+  -- 5. Format: 不要なタグの削除と、指定文字列の自動置換
+  local replacements = {
+    [[1s/^\S\+\s\+\(.\{-}\)\s\+歌詞.*/\[ti:\1\]/e]],
+    [[2s/作詞:/\[au:/ge]],
+    [[2s/。$/\]/ge]],
+    [[2s/,作曲:/\//e]],
+    [[3s/^/\[ar:/ge]],
+    [[3s/$/\]/ge]],
+    [[%s/<br \=\/\=>/\r/ge]],
+    [[%s/<\/div>//ge]],
+    [[%s/^\s\+<div.*>//ge]],
+    [[%s/&amp;/\&/ge]],
+    [[%s/GORO MATSUI/松井五郎/ige]],
+    [[%s/KYOSUKE HIMURO/氷室京介/ige]],
+    [[%s/\n\+\%$//e]],
+  }
+  
+  for _, cmd in ipairs(replacements) do
+    vim.cmd('silent! ' .. cmd)
+  end
+  print("歌詞の取得と整形が完了しました！")
+end, {})
