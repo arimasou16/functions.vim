@@ -127,7 +127,7 @@ vim.api.nvim_create_user_command('GetLyrics', function()
 
   -- 3. Extract: HTMLから必要な部分だけをくり貫く
   local title  = vim.fn.matchstr(html, [[<title>\zs\_.\{-}\ze</title>]])
-  local credit = vim.fn.matchstr(html, [[歌詞ページです。\zs\_.\{-}\ze(歌いだし)]])
+  local credit = vim.fn.matchstr(html, [[歌詞ページです。\zs\_.\{-}\ze。]])
   local lyrics = vim.fn.matchstr(html, [[<div id="kashi_area" itemprop="text">\zs\_.\{-}\ze</div>]])
   local artist = vim.fn.matchstr(html, [[<span itemprop="byArtist name">\zs\_.\{-}\ze</span>]])
 
@@ -154,7 +154,7 @@ vim.api.nvim_create_user_command('GetLyrics', function()
   local replacements = {
     [[1s/^\S\+\s\+\(.\{-}\)\s\+歌詞.*/\[ti:\1\]/e]],
     [[2s/作詞:/\[au:/ge]],
-    [[2s/。$/\]/ge]],
+    [[2s/$/\]/ge]],
     [[2s/,作曲:/\//e]],
     [[3s/^/\[ar:/ge]],
     [[3s/$/\]/ge]],
