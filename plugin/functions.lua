@@ -172,3 +172,140 @@ vim.api.nvim_create_user_command('GetLyrics', function()
   end
   print("歌詞の取得と整形が完了しました！")
 end, {})
+
+-- ============================================================================
+-- プチリリ専用
+-- ============================================================================
+vim.api.nvim_create_user_command('GetPetitLyrics', function()
+  -- 1. コマンドラインで曲のIDを入力させる
+  local id = vim.fn.input("プチリリの曲IDを入力してください (例: 3387444): ")
+  
+  if id == "" then
+    print("\nキャンセルしました。")
+    return
+  end
+  
+  -- バッファをクリアして「取得中」メッセージを表示
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, {})
+  print("\n取得中...")
+  vim.cmd('redraw')
+
+  --------------------------------------------------
+  -- Step 1: HTMLの取得 ＋ Cookieの保存
+  --------------------------------------------------
+  local html_url = "https://petitlyrics.com/lyrics/" .. id
+  local cookie_file = vim.fn.tempname()
+  
+  -- -c でCookieを保存しつつHTMLを取得
+  local html = vim.fn.system({"curl", "-s", "-c", cookie_file, html_url})
+  
+  if vim.v.shell_error ~= 0 or html == "" then
+    print("HTMLの取得に失敗しました。")
+    return
+  end
+
+  local meta_desc = vim.fn.matchstr(html, [[<meta name="description" content="\zs\_.\{-}\ze"]])
+  local title  = vim.fn.matchstr(meta_desc, [[^\zs.\{-}\ze / ]])
+  local artist = vim.fn.matchstr(meta_desc, [[ / \zs.\{-}\ze の歌詞ページ]])
+  local credit_raw = vim.fn.matchstr(meta_desc, [[作詞:\zs.\{-}\ze 歌いだし:]])
+  local credit = vim.fn.substitute(credit_raw, [[\s*作曲:]], "/", "g")
+
+  --------------------------------------------------
+  -- Step 2: JSファイルを読み込んで CSRFトークン を抜き出す
+  --------------------------------------------------
+  local js_url = "https://petitlyrics.com/lib/pl-lib.js"
+  
+  -- Cookieを維持したまま、トークンが隠されたJSファイルを取得
+  local js_content = vim.fn.system({"curl", "-s", "-b", cookie_file, "-c", cookie_file, js_url})
+  
+  -- JSの中から 'X-CSRF-Token', 'xxxxxxxxxxxxxxxxxxxx' のような記述を探す
+  local csrf_token = vim.fn.matchstr(js_content, [['X-CSRF-Token',\s*'\zs[^']\+\ze']])
+
+  if csrf_token == "" then
+    print("CSRFトークンの抽出に失敗しました。サイトの仕様が変わった可能性があります。")
+    vim.fn.delete(cookie_file)
+    return
+  end
+
+  --------------------------------------------------
+  -- Step 3: ヘッダーとCookieを偽装してAJAX APIを叩く
+  --------------------------------------------------
+  local api_url = "https://petitlyrics.com/com/get_lyrics.ajax"
+  
+  local curl_args = {
+    "curl", "-s", "-X", "POST",
+    "-b", cookie_file,                            -- セッションCookieを送信
+    "-H", "X-Requested-With: XMLHttpRequest",     -- AJAX通信の偽装
+    "-H", "Referer: " .. html_url,                -- リファラー（どこから来たか）の偽装
+    "-H", "X-CSRF-Token: " .. csrf_token,         -- ★JSから引っこ抜いた合言葉！
+    "-d", "lyrics_id=" .. id,
+    api_url
+  }
+
+  local json_response = vim.fn.system(curl_args)
+  
+  -- 使用後のCookie一時ファイルを削除
+  vim.fn.delete(cookie_file)
+
+  if vim.v.shell_error ~= 0 or json_response == "" then
+    print("歌詞データ(API)の取得に失敗しました。")
+    return
+  end
+
+  -- JSON文字列をLuaのテーブル（配列）に変換
+  local ok, decoded_json = pcall(vim.fn.json_decode, json_response)
+  if not ok then
+    print("歌詞データの解析に失敗しました。")
+    return
+  end
+
+  --------------------------------------------------
+  -- Step 3: Base64のデコードとバッファへの書き込み
+  --------------------------------------------------
+  local result_lines = {}
+  
+  if title ~= "" then table.insert(result_lines, "[ti:" .. title .. "]") end
+  if credit ~= "" then table.insert(result_lines, "[au:" .. credit .. "]") end
+  if artist ~= "" then table.insert(result_lines, "[ar:" .. artist .. "]") end
+
+  -- Base64をデコードする安全な関数
+  local function decode_b64(str)
+    if not str or str == "" then return "" end
+    -- Neovim 0.10 以降の標準関数を使用
+    if vim.base64 and vim.base64.decode then
+      return vim.base64.decode(str)
+    end
+    -- Neovim 0.9 以下の場合はシステムコマンド(base64)にフォールバック
+    local cmd = string.format("echo %s | base64 --decode 2>/dev/null || echo %s | base64 -D", vim.fn.shellescape(str), vim.fn.shellescape(str))
+    local res = vim.fn.system(cmd)
+    return res:gsub("\n$", "") -- 末尾の余分な改行を削る
+  end
+
+  -- JSONの各行（Base64）をデコードしながら追加していく
+  for _, line_data in ipairs(decoded_json) do
+    local b64_str = line_data.lyrics or ""
+    local decoded_line = decode_b64(b64_str)
+    table.insert(result_lines, decoded_line)
+  end
+
+  -- バッファを上書き
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, result_lines)
+
+  --------------------------------------------------
+  -- Step 4: 後処理（文字実体参照などの置換）
+  --------------------------------------------------
+  local replacements = {
+    [[%s/&#039;/'/ge]],
+    [[%s/&quot;/"/ge]],
+    [[%s/&amp;/\&/ge]],
+    [[%s/&lt;/</ge]],
+    [[%s/&gt;/>/ge]],
+    [[%s/\n\+\%$//e]], -- ファイル末尾の空行を削除
+  }
+  
+  for _, cmd in ipairs(replacements) do
+    vim.cmd('silent! ' .. cmd)
+  end
+
+  print("プチリリからの歌詞取得と整形が完了しました！")
+end, {})
