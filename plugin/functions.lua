@@ -100,32 +100,19 @@ vim.api.nvim_create_user_command('OpenHugo', function()
 end, {})
 
 -- ============================================================================
--- GetLyrics
+-- FormatUtaNet
 -- ============================================================================
-vim.api.nvim_create_user_command('GetLyrics', function()
-  -- 1. コマンドラインで曲のID（*******の部分）を入力させる
-  local id = vim.fn.input("歌ネットの曲IDを入力してください (例: 12345): ")
-  
-  -- 空のままエンターを押した場合はキャンセル
-  if id == "" then
-    print("\nキャンセルしました。")
-    return
-  end
-  
-  -- 画面を更新して「取得中」メッセージを表示
-  print("\n取得中...")
-  vim.cmd('redraw')
+vim.api.nvim_create_user_command('FormatUtaNet', function()
+  -- 1. 現在のバッファの全行を取得して結合
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local html = table.concat(lines, "\n")
 
-  -- 2. curlを使ってバックグラウンドでHTMLを直接取得
-  local url = "https://www.uta-net.com/song/" .. id .. "/"
-  local html = vim.fn.system({"curl", "-s", url})
-  
-  if vim.v.shell_error ~= 0 or html == "" then
-    print("取得に失敗しました。IDが間違っているか、ネットワークを確認してください。")
+  if html == "" then
+    print("バッファが空です。HTMLソースを貼り付けてから実行してください。")
     return
   end
 
-  -- 3. Extract: HTMLから必要な部分だけをくり貫く
+  -- 2. Extract: HTMLから必要な部分だけをくり貫く
   local title  = vim.fn.matchstr(html, [[<title>\zs\_.\{-}\ze</title>]])
   local credit = vim.fn.matchstr(html, [[歌詞ページです。\zs\_.\{-}\ze。]])
   local lyrics = vim.fn.matchstr(html, [[<div id="kashi_area" itemprop="text">\zs\_.\{-}\ze</div>]])
@@ -143,14 +130,14 @@ vim.api.nvim_create_user_command('GetLyrics', function()
   end
 
   if #result_lines == 0 then
-    print("指定されたパターンが見つかりませんでした。")
+    print("抽出失敗: 歌ネットの正しいHTMLソースが貼り付けられているか確認してください。")
     return
   end
 
-  -- 4. 現在のバッファを、くり貫いた結果で上書きする
+  -- 3. 現在のバッファ（大量のHTML）を、くり貫いた結果で上書きする
   vim.api.nvim_buf_set_lines(0, 0, -1, false, result_lines)
 
-  -- 5. Format: 不要なタグの削除と、指定文字列の自動置換
+  -- 4. Format: ご自身で作成した完璧な置換ルールを適用
   local replacements = {
     [[1s/^\S\+\s\+\(.\{-}\)\s\+歌詞.*/\[ti:\1\]/e]],
     [[2s/作詞:/\[au:/ge]],
@@ -170,7 +157,8 @@ vim.api.nvim_create_user_command('GetLyrics', function()
   for _, cmd in ipairs(replacements) do
     vim.cmd('silent! ' .. cmd)
   end
-  print("歌詞の取得と整形が完了しました！")
+
+  print("バッファ内のHTMLから歌詞を抽出・整形しました！")
 end, {})
 
 -- ============================================================================
